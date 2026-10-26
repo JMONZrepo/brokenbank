@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: GoCortexIO
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Version: 1.6.0
+// Version: 1.7.0
 //
 // GoCortex Broken Bank - Live Transaction Ticker (WebSocket, port 6666)
 //

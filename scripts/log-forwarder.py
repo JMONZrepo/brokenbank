@@ -3,18 +3,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # GoCortex Broken Bank - Tomcat Log Forwarder
-# Version: 1.6.0
+# Version: 1.7.0
 #
-# This script tails Tomcat access logs and forwards them to a configured
-# HTTP endpoint for SIEM ingestion. The logs are shipped in their native
-# Apache Combined format for compatibility with Tomcat-aware parsers.
+# This script tails Tomcat access logs and forwards each line to a configured
+# HTTP endpoint for SIEM ingestion (the tomcat_access stream). Lines are
+# shipped verbatim as text/plain in the format Tomcat writes them: the stock
+# Tomcat 8.5 AccessLogValve "common" pattern (%h %l %u %t "%r" %s %b),
+# which carries no Referer or User-Agent.
 #
 # Usage:
-#   python scripts/log-forwarder.py [--log-path /path/to/tomcat/logs]
+#   python scripts/log-forwarder.py [--log-path /path/to/tomcat/logs] [--config config/logging.yaml]
 #
 # Environment variables:
 #   LOG_ENDPOINT_TOMCAT_ACCESS - HTTP endpoint URL for log shipping
 #   LOG_AUTH_TOMCAT_ACCESS - Authentication token for the endpoint
+#
+# Note: unlike log_shipping.py, this forwarder does not read
+# LOG_SHIPPING_ENABLED or log_shipping.enabled. If LOG_ENDPOINT_TOMCAT_ACCESS
+# is empty it falls back to defaults.base_url + defaults.path in
+# config/logging.yaml and ships there.
 
 import os
 import sys

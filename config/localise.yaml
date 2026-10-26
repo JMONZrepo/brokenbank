@@ -33,11 +33,11 @@ landing_copy:
     - "Real-time Transaction Monitoring"
 banking_services:
   - name: "Personal Banking"
-    endpoints: ["/search", "/comment", "/ping"]
+    endpoints: ["/netbank", "/search", "/comment"]
     description: "Comprehensive personal banking solutions and account management"
     severity: "CRITICAL"
   - name: "Business Banking"
-    endpoints: ["/debug", "/log"]
+    endpoints: ["/debug", "/log/<message>"]
     description: "Advanced business banking tools and corporate financial services"
     severity: "HIGH"
   - name: "Investment Services"
@@ -119,6 +119,11 @@ landing_service_cards:
     description: "Anonymous digital banking and cryptocurrency services"
     badge: "Available"
     badge_type: "success"
+  estatements:
+    title: "eStatements Portal"
+    description: "Upload and reconcile your account statements online"
+    badge: "New"
+    badge_type: "info"
   open_account_button: "Open New Account - No Verification Required"
 
 exploit_section:
@@ -150,13 +155,33 @@ exploit_section:
   
   code_evaluation:
     title: "Code Evaluation"
-    description: "ScriptEngine JavaScript/Groovy execution"
+    description: "ScriptEngine JavaScript (Nashorn) execution"
     button_text: "Test Eval"
   
   spring4shell:
     title: "Spring4Shell"
     description: "CVE-2022-22965 RCE (CVSS 9.8 Critical)"
     button_text: "Test Spring4Shell"
+
+  xml_restore:
+    title: "XMLDecoder Restore"
+    description: "java.beans.XMLDecoder deserialisation RCE"
+    button_text: "Test Restore"
+
+  log4shell:
+    title: "Log4Shell"
+    description: "CVE-2021-44228 JNDI lookup RCE (CVSS 10.0 Critical)"
+    button_text: "Test Log4Shell"
+
+  snakeyaml:
+    title: "SnakeYAML"
+    description: "CVE-2022-1471 unsafe deserialisation RCE (CVSS 9.8 Critical)"
+    button_text: "Test SnakeYAML"
+
+  php_estatements:
+    title: "PHP eStatements Portal"
+    description: "PHP 8.4.26 on Apache mod_php, port 8085. PHP2Shell: CVE-2026-109618 / CVE-2026-109619 (CVSS 9.2)"
+    button_text: "Open Portal (8085)"
 
 cta:
   title: "Ready to Start Banking?"
@@ -201,7 +226,7 @@ disclaimer:
         - "And 37+ more high severity issues..."
     secrets:
       title: "Secrets Detection (75+ patterns)"
-      intro: "Includes hardcoded credentials for 75+ services:"
+      intro: "Includes 75+ hardcoded credential values across 20+ service types:"
       entries:
         - "AWS Access Keys - CKV_SECRET_2"
         - "OpenAI API Key - CKV_SECRET_107"
@@ -647,12 +672,14 @@ tomcat_servlets:
     jdk_requirement: "17 (Required for Spring4Shell exploitation)"
     return_link: "Return to Flask Application"
 
-# SpaceATM Terminal Localisation (React/Next.js ATM Simulator - Port 7777)
+# SpaceATM Terminal reference values (React/Next.js ATM simulator - port 7777).
+# NOT read at runtime: react-app hard-codes these strings and PINs, so edits here
+# do not change the terminal and LOCALE=kr does not translate it.
 spaceatm:
   terminal:
     title: "SpaceATM Terminal"
     subtitle: "Mars Banking Initiative"
-    boot_message: "SpaceATM Terminal v1.6.0 - Initialising..."
+    boot_message: "SpaceATM Terminal v1.7.0 - Initialising..."
     ready_message: "Terminal Ready"
     manufacturer: "GoCortex IO Pty Ltd"
     manufacturer_location: "Southbank VIC 3006"
@@ -661,7 +688,7 @@ spaceatm:
     serial_number: "VIC-SA-003847"
     model: "SA-7000 Series"
     firmware: "FW-2025.03.1"
-    version_label: "Broken Bank v1.6.0"
+    version_label: "Broken Bank v1.7.0"
     cve_surface: "CVE-2025-55182"
   
   currency:

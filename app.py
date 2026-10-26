@@ -13,7 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 # Proxy imports removed - no separate lab applications
 
 # Log shipping for SIEM integration
-from log_shipping import bbwaf_logging_middleware, log_auth_event, log_concierge_event
+from log_shipping import bbwaf_logging_middleware, log_auth_event, log_concierge_event, log_netbank_view
 from auth_traffic_generator import start_auth_generator
 
 # OTel poll-based metrics (Prometheus scrape endpoint on port 9464)
@@ -53,7 +53,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False  # Suppress Flask-SQLAlchem
 db.init_app(app)
 
 # Application version
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 
 # OTel metrics - start Prometheus scrape endpoint on port 9464
 init_metrics(port=9464)
@@ -234,8 +234,11 @@ from chatbot import concierge as _concierge
 # illusion that the model is actually being attacked.
 _concierge.start_warmup()
 
-CONCIERGE_MODEL_NAME = os.environ.get(
-    "CONCIERGE_MODEL_NAME", "SmolLM2-135M-Instruct GGUF Q4_K_M"
+# Falls back to whichever model the configured provider actually uses (the
+# bundled GGUF, or the SaaS model named in config/concierge.yaml) so the
+# netbank_concierge SIEM stream reports what genuinely answered the turn.
+CONCIERGE_MODEL_NAME = (
+    os.environ.get("CONCIERGE_MODEL_NAME") or _concierge.model_name()
 )
 
 @app.route('/concierge')
@@ -244,6 +247,8 @@ def concierge_page():
     return render_template(
         'concierge.html',
         model_name=CONCIERGE_MODEL_NAME,
+        concierge_provider=_concierge.provider(),
+        concierge_system_prompt_mode=_concierge.system_prompt_mode(),
         context_count=len(_concierge.get_extra_context()),
         concierge_disabled=_concierge.is_disabled(),
         concierge_disabled_reason=_concierge.disabled_reason(),
@@ -443,9 +448,10 @@ def netbank():
         session['account_number'] = f"{random.randint(10000000, 99999999)}"
         session['sort_code'] = f"{random.randint(10, 99)}-{random.randint(10, 99)}-{random.randint(10, 99)}"
     
-    # Log authentication event for SIEM
+    # Log the session for SIEM: a login on first visit, then throttled
+    # session_refresh events (immediate if the address or browser changes)
     username = session.get('username', f"user_{session['account_number'][-4:]}")
-    log_auth_event(username, "success", request, simulated=False)
+    log_netbank_view(session, request, username, session['account_number'])
     
     balance = session['account_balance']
     account_number = session['account_number']
@@ -502,7 +508,19 @@ def signup():
         
         # Log signup event for SIEM
         username = request.form.get('full_name', f"user_{new_account_number[-4:]}")
-        log_auth_event(username, "signup_success", request, simulated=False)
+        log_auth_event(
+            username, "signup_success", request, simulated=False,
+            event_action="account_created",
+            user_id=f"cus-{new_account_number}",
+            account_type="customer",
+            privilege="business_customer" if account_type == "business" else "retail_customer",
+            target_user=username,
+            auth_method="none",
+            mfa_used=False,
+            mfa_method="none",
+            mfa_result="not_enrolled",
+            http_status=200,
+        )
         
         return render_template('signup.html', 
                              success=True,

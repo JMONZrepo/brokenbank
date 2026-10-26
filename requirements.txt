@@ -51,6 +51,9 @@ prometheus-client==0.20.0
 # Image processing (installed in container)
 Pillow==8.1.0
 
+# Local LLM runtime for the Mars Banking Initiative Concierge (installed in container)
+llama-cpp-python==0.3.5
+
 # === SCA scanner only - NOT installed in container; listed for SCA CVE coverage ===
 psycopg2-binary==2.9.6
 lxml==4.6.3
@@ -95,11 +98,15 @@ subprocess32==3.5.4
 # Weak hashing
 hashlib-compat==1.0.1
 
+# =============================================================================
+# Installed in container (returns to runtime tier)
+# =============================================================================
 # Runtime dependency for authentication traffic generator
 faker==18.13.0
 
 # PyGremlinBox varied license packages for license compliance testing
-# These packages trigger SCA license policy alerts for comprehensive testing
+# All 65 PyGremlinBox packages below ARE installed in the container by the
+# Dockerfile pip install block. They trigger SCA license policy alerts.
 pygremlinbox-agpl-1-0==1.4.6
 pygremlinbox-agpl-1-0-only==1.4.6
 pygremlinbox-agpl-1-0-or-later==1.4.6

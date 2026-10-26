@@ -1,6 +1,6 @@
 {
   "name": "brokenbank-ticker-service",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "GoCortex Broken Bank - Live Transaction Ticker (WebSocket)",
   "main": "server.js",

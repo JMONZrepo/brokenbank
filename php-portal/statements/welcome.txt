@@ -1,0 +1,7 @@
+Mars Banking Initiative - eStatements Portal
+============================================
+
+No statements have been reconciled against this account yet.
+
+Upload a PDF or CSV export from the main NetBank portal and it will appear
+here once processing completes.

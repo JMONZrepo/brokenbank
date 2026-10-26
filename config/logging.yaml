@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # GoCortex Broken Bank - Log Shipping Configuration
-# Version: 1.6.0
+# Version: 1.7.0
 #
 # This file configures HTTP POST-based log shipping to external SIEM platforms.
 # Endpoint URLs and authentication tokens should be set via environment variables.
@@ -22,12 +22,12 @@ log_shipping:
     backoff_seconds: 5
   
 endpoints:
-  # Native Tomcat access logs (Apache Combined format)
+  # Native Tomcat access logs (Apache Common Log Format - stock Tomcat 8.5 AccessLogValve)
   tomcat_access:
     url: "${LOG_ENDPOINT_TOMCAT_ACCESS}"
     enabled: true
-    format: "combined"
-    description: "Tomcat HTTP access logs in Apache Combined format"
+    format: "common"
+    description: "Tomcat HTTP access logs in Apache Common Log Format"
     
     auth:
       type: "header"
@@ -79,6 +79,9 @@ endpoints:
     # Background traffic generator settings
     generator:
       enabled: true
+      # Sign-ins per minute, not events: each emits 1-8 events (MFA
+      # challenges, login, refreshes, logout). About 12 events/minute in
+      # total at 4, including scenarios and service accounts
       rate_per_minute: 4
       
     auth:

@@ -74,6 +74,12 @@ spec:
               containerPort: 6666
               hostPort: 6666
               protocol: TCP
+
+            # PHP eStatements portal (Apache mod_php)
+            - name: estatements
+              containerPort: 8085
+              hostPort: 8085
+              protocol: TCP
           env:
             - name: SESSION_SECRET
               value: "hardcoded-docker-secret-key"

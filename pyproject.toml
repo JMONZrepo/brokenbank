@@ -1,6 +1,6 @@
 [project]
 name = "gocortexbrokenbank"
-version = "1.6.0"
+version = "1.7.0"
 description = "GoCortex Broken Bank - Intentionally vulnerable banking application for CI/CD security testing and educational purposes"
 license = "AGPL-3.0-or-later"
 authors = [
@@ -8,7 +8,10 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    # Vulnerable packages for SAST testing (pinned to vulnerable versions)
+    # Runtime dependencies installed in the container (mirrors the Dockerfile
+    # pip install blocks, including the separate llama-cpp-python layer). The
+    # core packages are pinned to known-vulnerable versions for SCA CVE
+    # testing; the PyGremlinBox packages exist for SCA licence-policy testing.
     "cryptography==39.0.0",
     "email-validator==1.1.3",
     "flask==2.0.1",
@@ -32,9 +35,8 @@ dependencies = [
     "urllib3==1.26.5",
     "werkzeug==2.0.1",
     "jinja2==3.0.1",
-    # Local LLM runtime for the Mars Banking Initiative Concierge (LLM01/LLM06 demo)
+    # Local LLM runtime for the Mars Banking Initiative Concierge (OWASP LLM01/LLM02/LLM06/LLM08 demo)
     "llama-cpp-python==0.3.5",
-    "huggingface_hub",
     # PyGremlinBox varied license packages for license compliance testing
     "pygremlinbox-agpl-1-0==1.4.6",
     "pygremlinbox-agpl-1-0-only==1.4.6",

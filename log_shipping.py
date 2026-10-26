@@ -2,14 +2,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # GoCortex Broken Bank - Log Shipping Module
-# Version: 1.6.0
+# Version: 1.7.0
 #
 # This module provides HTTP POST-based log shipping to external SIEM platforms.
-# Supports multiple log types: tomcat_access, netbank_application, netbank_auth
+# Ships three JSON log types: netbank_application (BBWAF exploitation events),
+# netbank_concierge (Concierge prompts, responses and loaded context) and
+# netbank_auth (authentication events, real and simulated). The fourth
+# stream, tomcat_access, is shipped by scripts/log-forwarder.py.
 
 import os
 import json
 import logging
+import secrets
 import threading
 import time
 from datetime import datetime, timezone
@@ -18,6 +22,7 @@ from queue import Queue, Full
 
 import yaml
 import requests
+import auth_networks
 import observability.metrics as metrics
 
 # Suppress SSL warnings for intentionally insecure configuration
@@ -33,7 +38,16 @@ class LogShipper:
     
     def __init__(self, config_path="config/logging.yaml"):
         self.config = self._load_config(config_path)
-        self.enabled = self.config.get("log_shipping", {}).get("enabled", False)
+        # LOG_SHIPPING_ENABLED overrides the file so a container can turn log
+        # shipping on without editing config/logging.yaml, which is otherwise
+        # the one setting that forces a file edit (every URL and token is
+        # already an ${ENV} placeholder). Keeps a redeployed container's
+        # configuration entirely in its environment.
+        _env_enabled = os.environ.get("LOG_SHIPPING_ENABLED")
+        if _env_enabled is not None:
+            self.enabled = _env_enabled.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            self.enabled = self.config.get("log_shipping", {}).get("enabled", False)
         self.endpoints = self.config.get("endpoints", {})
         self.retry_config = self.config.get("log_shipping", {}).get("retry", {})
         self.defaults = self.config.get("defaults", {})
@@ -240,23 +254,51 @@ def log_bbwaf_event(endpoint, vulnerability, payload, request_obj):
     shipper.ship_log_async("netbank_application", log_data)
 
 
-def log_auth_event(username, status, request_obj, simulated=False):
+# Every netbank_auth event carries every one of these keys, null where it
+# does not apply, so a parser sees one shape whatever produced the event.
+# The first eleven are the original fields and keep their names, positions
+# and types; everything after "simulated" was added in 1.7.0 for login and
+# session detection. event_type stays the constant "authentication" so
+# existing parsers keep working; event_action is what tells events apart, and
+# a rule that counted status as login outcomes needs event_action = "login".
+AUTH_EVENT_FIELDS = (
+    "timestamp", "vendor", "product", "event_type", "username", "status",
+    "source_ip", "user_agent", "country", "device_type", "simulated",
+    "event_action", "user_id", "account_type", "privilege", "target_user",
+    "failure_reason", "auth_method", "mfa_used", "mfa_method", "mfa_result",
+    "session_id", "session_issued_at", "session_expires_at",
+    "geo_city", "asn", "asn_org", "device_id", "client_app", "tls_ja4",
+    "url_path", "http_status",
+)
+
+# User-Agent substrings that mark a scripting runtime or attack tool rather
+# than a browser. Note these are claims the client makes about itself.
+_SCRIPT_UA_MARKERS = (
+    "python-requests", "python-urllib", "aiohttp", "curl/", "wget/",
+    "go-http-client", "httpie", "libwww-perl", "java/",
+    "powershell", "axios/", "node-fetch", "scrapy", "hydra", "sqlmap",
+    "nikto",
+)
+
+
+def build_auth_event(username, status, *, source_ip, user_agent, simulated,
+                     timestamp=None, **fields):
     """
-    Log an authentication event to the netbank_auth stream.
-    
-    Args:
-        username: The username attempting authentication
-        status: "success" or "failure"
-        request_obj: Flask request object
-        simulated: True if this is generated background traffic
+    Build one netbank_auth event with the full AUTH_EVENT_FIELDS key set.
+
+    country, geo_city, asn and asn_org are derived from source_ip via the
+    auth_networks table, device_type and client_app from user_agent, and
+    event_action defaults to "login". Any keyword in AUTH_EVENT_FIELDS
+    overrides the derived value.
     """
-    shipper = get_log_shipper()
-    
-    user_agent = request_obj.headers.get("User-Agent", "unknown") if request_obj else "unknown"
-    source_ip = request_obj.remote_addr if request_obj else "unknown"
-    
-    log_data = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+    unknown = set(fields) - set(AUTH_EVENT_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown netbank_auth field(s): {sorted(unknown)}")
+
+    network = auth_networks.lookup(source_ip)
+    event = dict.fromkeys(AUTH_EVENT_FIELDS)
+    event.update({
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
         "vendor": "GoCortex",
         "product": "BrokenBank",
         "event_type": "authentication",
@@ -264,12 +306,98 @@ def log_auth_event(username, status, request_obj, simulated=False):
         "status": status,
         "source_ip": source_ip,
         "user_agent": user_agent,
-        "country": _detect_country(source_ip),
+        "country": network.country if network else auth_networks.HOME_COUNTRY,
         "device_type": _detect_device_type(user_agent),
-        "simulated": simulated
-    }
-    
+        "simulated": simulated,
+        "event_action": "login",
+        "geo_city": network.cities[0] if network else None,
+        "asn": network.asn if network else None,
+        "asn_org": network.asn_org if network else None,
+        "client_app": _detect_client_app(user_agent),
+    })
+    event.update(fields)
+    return event
+
+
+def log_auth_event(username, status, request_obj, simulated=False, **fields):
+    """
+    Log an authentication event to the netbank_auth stream.
+
+    Args:
+        username: The username attempting authentication
+        status: "success" or "failure" ("signup_success" for /signup)
+        request_obj: Flask request object
+        simulated: True if this is generated background traffic
+        **fields: Any further AUTH_EVENT_FIELDS (event_action, session_id...)
+    """
+    shipper = get_log_shipper()
+
+    user_agent = request_obj.headers.get("User-Agent", "unknown") if request_obj else "unknown"
+    source_ip = (request_obj.remote_addr or "unknown") if request_obj else "unknown"
+    if request_obj is not None:
+        fields.setdefault("url_path", request_obj.path)
+
+    log_data = build_auth_event(
+        username, status,
+        source_ip=source_ip, user_agent=user_agent, simulated=simulated,
+        **fields,
+    )
+
     shipper.ship_log_async("netbank_auth", log_data)
+
+
+# A real /netbank session re-reports itself at most this often while it stays
+# on the address and browser that opened it. A change of either is reported
+# on the request that shows it, which is what makes a replayed session cookie
+# visible: the cookie is signed with a hard-coded key and never expires.
+NETBANK_SESSION_REFRESH_SECONDS = 300
+
+
+def log_netbank_view(flask_session, request_obj, username, account_number):
+    """
+    Report a real /netbank visit on the netbank_auth stream.
+
+    /netbank grants a session with no credentials at all, so the first visit
+    is logged as a login with auth_method "none". Later visits are logged as
+    session_refresh against the same session_id, throttled unless the source
+    address or User-Agent differs from the one the session was opened from.
+    """
+    now = time.time()
+    source_ip = (request_obj.remote_addr or "unknown") if request_obj else "unknown"
+    user_agent = request_obj.headers.get("User-Agent", "unknown") if request_obj else "unknown"
+
+    session_id = flask_session.get("auth_session_id")
+    if not session_id:
+        session_id = f"sess-{secrets.token_hex(12)}"
+        flask_session["auth_session_id"] = session_id
+        flask_session["auth_issued_at"] = datetime.now(timezone.utc).isoformat()
+        flask_session["auth_device_id"] = f"dev-{secrets.token_hex(6)}"
+        flask_session["auth_ip"] = source_ip
+        flask_session["auth_ua"] = user_agent
+        event_action = "login"
+    elif (source_ip != flask_session.get("auth_ip")
+          or user_agent != flask_session.get("auth_ua")
+          or now - flask_session.get("auth_last_event", 0) >= NETBANK_SESSION_REFRESH_SECONDS):
+        event_action = "session_refresh"
+    else:
+        return
+    flask_session["auth_last_event"] = now
+
+    log_auth_event(
+        username, "success", request_obj,
+        event_action=event_action,
+        user_id=f"cus-{account_number}",
+        account_type="customer",
+        privilege="retail_customer",
+        auth_method="none",
+        mfa_used=False,
+        mfa_method="none",
+        mfa_result="not_enrolled",
+        session_id=session_id,
+        session_issued_at=flask_session.get("auth_issued_at"),
+        device_id=flask_session.get("auth_device_id"),
+        http_status=200,
+    )
 
 
 def log_concierge_event(event_type, request_obj, *, session_id, turn_id,
@@ -337,10 +465,23 @@ def log_concierge_event(event_type, request_obj, *, session_id, turn_id,
 
 
 def _detect_country(ip_address):
-    """Simple country detection based on IP patterns (mock implementation)."""
-    if not ip_address or ip_address in ["unknown", "127.0.0.1", "::1"]:
-        return "AU"
-    return "AU"
+    """Country for ip_address from the auth_networks table, else the home country."""
+    network = auth_networks.lookup(ip_address)
+    return network.country if network else auth_networks.HOME_COUNTRY
+
+
+def _detect_client_app(user_agent):
+    """Classify the client from its User-Agent: browser, mobile_app, script or unknown."""
+    if not user_agent or user_agent == "unknown":
+        return "unknown"
+    ua_lower = user_agent.lower()
+    if ua_lower.startswith("brokenbankmobile/"):
+        return "mobile_app"
+    if any(marker in ua_lower for marker in _SCRIPT_UA_MARKERS):
+        return "script"
+    if ua_lower.startswith("mozilla/"):
+        return "browser"
+    return "unknown"
 
 
 def _detect_device_type(user_agent):
@@ -350,10 +491,11 @@ def _detect_device_type(user_agent):
     
     ua_lower = user_agent.lower()
     
-    if any(mobile in ua_lower for mobile in ["mobile", "android", "iphone", "ipod"]):
-        return "mobile"
-    elif any(tablet in ua_lower for tablet in ["ipad", "tablet"]):
+    # Tablet first: iPad Safari also says "Mobile" in its User-Agent
+    if any(tablet in ua_lower for tablet in ["ipad", "tablet"]):
         return "tablet"
+    elif any(mobile in ua_lower for mobile in ["mobile", "android", "iphone", "ipod"]):
+        return "mobile"
     else:
         return "desktop"
 

@@ -121,7 +121,7 @@ def main():
     """Main entry point for the script."""
     if len(sys.argv) != 4:
         print("Usage: generate-servlet-properties.py <yaml_path> <output_path> <app_version>")
-        print("Example: generate-servlet-properties.py localise.yaml exploit-app/src/main/resources/servlet-locale.properties 1.1.0")
+        print("Example: generate-servlet-properties.py config/localise.yaml exploit-app/src/main/resources/servlet-locale.properties 1.7.0")
         sys.exit(1)
     
     yaml_path = sys.argv[1]

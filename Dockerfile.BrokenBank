@@ -21,10 +21,9 @@
 # - Missing security hardening (HEALTHCHECK, USER, WORKDIR)
 # ==============================================================================
 
-# FAILSAFE: This RUN instruction will fail the build immediately if anyone
-# attempts to build this Dockerfile. Remove this line at your own risk.
-FROM alpine:latest AS failsafe
-RUN echo "ERROR: Dockerfile.BrokenBank is for IaC scanning only. Do not build." && exit 1
+# FAILSAFE: this file is for IaC scanning only and must never be built. The
+# failsafe RUN is placed right after the (single, final-stage) FROM below so
+# it also stops a default BuildKit `docker build`, not only the legacy builder.
 
 # ==============================================================================
 # SECTION 1: Base Image Misconfigurations
@@ -32,6 +31,7 @@ RUN echo "ERROR: Dockerfile.BrokenBank is for IaC scanning only. Do not build." 
 
 # Using latest tag without version pinning (unpredictable builds)
 FROM ubuntu:latest
+RUN echo "ERROR: Dockerfile.BrokenBank is for IaC scanning only. Do not build." && exit 1
 
 # Using deprecated MAINTAINER instruction instead of LABEL
 MAINTAINER vulnerable@example.com

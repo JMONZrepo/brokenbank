@@ -2,20 +2,32 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # GoCortex Broken Bank - Anomaly Seed Configuration
-# Version: 1.6.0
+# Version: 1.7.0
 #
 # This file defines predictable suspicious patterns that are seeded into
 # the simulated authentication traffic for SIEM demo and testing purposes.
 #
 # These values appear at defined intervals to create detectable patterns
 # that security analysts can identify during demonstrations.
+#
+# Every key here is optional. A scenario left out of this file still runs
+# at the defaults in auth_traffic_generator.py; set enabled: false on a
+# scenario to switch it off. A value of the wrong type or out of range is
+# ignored with a warning in the log and its default used instead.
 
 anomaly_config:
-  # How often seeded anomalies appear in the traffic stream
+  # How often a seeded suspicious IP appears in the traffic stream. The
+  # seeded User-Agent has its own fixed 10-minute interval
   frequency_minutes: 10
   
-  # Percentage of traffic that contains seeded anomalies (0-100)
+  # Percentage of traffic that contains seeded anomalies (0-100). Not read
+  # by the generator at present; kept for compatibility
   anomaly_percentage: 5
+
+  # Each scenario first fires at a random point within this many minutes of
+  # start-up (or within its own frequency, if shorter), then every
+  # frequency_minutes after that
+  scenario_initial_delay_max_minutes: 15
 
 # Suspicious source IP addresses
 # These IPs will be seeded into the authentication stream at the configured frequency
@@ -68,7 +80,10 @@ suspicious_user_agents:
     weight: 1
 
 # Predefined attack scenarios
-# These create recognisable patterns for SIEM correlation rules
+# These create recognisable patterns for SIEM correlation rules. Each is a
+# multi-event sequence on the netbank_auth stream, told apart by event_action
+# (login, mfa_challenge, session_refresh, password_reset, ...). Normal
+# traffic deliberately includes the benign lookalike of most of them.
 scenarios:
   brute_force:
     description: "Multiple failed logins from same IP within short timeframe"
@@ -77,6 +92,11 @@ scenarios:
       failed_attempts: 10
       time_window_seconds: 60
       source_ip: "91.240.118.172"
+      # Then try the right password: succeeds outright only where the
+      # victim never enrolled MFA, otherwise the challenge fails (push
+      # timeout, SMS code expired, or wrong TOTP code)
+      then_success: true
+      user_agent: "Mozilla/4.0 (Hydra)"
       
   credential_stuffing:
     description: "Multiple usernames attempted from same IP"
@@ -85,6 +105,9 @@ scenarios:
       unique_usernames: 20
       time_window_seconds: 120
       source_ip: "193.142.146.35"
+      # Leaked pairs that still work (only against accounts without MFA).
+      # User-Agents rotate per attempt; the TLS fingerprint does not
+      successes: 1
       
   impossible_travel:
     description: "Same user authenticates from AU then KR within 5 minutes"
@@ -102,9 +125,106 @@ scenarios:
       successful_login: true
       password_change: true
 
+  password_spray:
+    description: "One password tried once against many real usernames, low and slow"
+    frequency_minutes: 65
+    pattern:
+      usernames: 15
+      time_window_seconds: 600
+      source_ip: "88.198.47.12"
+
+  session_token_replay:
+    description: "A live session is reused from a second address and client"
+    frequency_minutes: 40
+    pattern:
+      # Must end inside a 30-minute browser session: at most 1500 seconds
+      replay_delay_seconds: [60, 300]
+      replays: 3
+      # Share of replays whose session was issued days ago, so no login
+      # for it exists in the stream at all
+      orphan_probability: 0.3
+
+  mfa_push_bombing:
+    description: "Repeated push challenges denied or ignored, then one approved"
+    frequency_minutes: 50
+    pattern:
+      denied_pushes: 8
+      time_window_seconds: 180
+
+  mfa_enrolment_after_failure:
+    description: "Failed login, failed challenge, success, then a new MFA device"
+    frequency_minutes: 70
+
+  helpdesk_mfa_reset:
+    description: "Helpdesk clears a customer's MFA and password, then the account re-enrols"
+    frequency_minutes: 80
+    pattern:
+      # The rest are genuine device replacements (phone or computer): the
+      # same sequence from the customer's home network or own mobile carrier
+      malicious_probability: 0.5
+
+  username_case_variance:
+    description: "MFA demanded for the username, skipped for a case variant of it"
+    frequency_minutes: 100
+
+  scripted_client_login:
+    description: "Customer account signed in by a scripting runtime, then refreshed at machine rate"
+    frequency_minutes: 55
+    pattern:
+      user_agent: "python-requests/2.31.0"
+      refreshes: 6
+      # At most 1500 seconds, so every refresh lands inside the session
+      refresh_window_seconds: 60
+
+  dormant_account_login:
+    description: "A departed staff account that was never disabled signs in"
+    frequency_minutes: 120
+    pattern:
+      # Never seen in normal traffic. Use this list as the HR leavers
+      # lookup that the detection needs
+      accounts:
+        - username: "r.okafor"
+          user_id: "stf-4211730"
+          privilege: "teller"
+          departed: "2026-03-31"
+        - username: "m.lindqvist"
+          user_id: "stf-4209951"
+          privilege: "helpdesk_agent"
+          departed: "2026-06-12"
+
+  break_glass_login:
+    description: "Sign-in attempts against the emergency access account"
+    frequency_minutes: 180
+    pattern:
+      username: "bb-breakglass-01"
+      attempts: 3
+      time_window_seconds: 90
+
 # Normal traffic distribution for realistic background
 normal_traffic:
-  # Countries for randomised source IPs (weighted distribution)
+  # The simulated population is rebuilt identically from this seed on every
+  # start, so usernames, home networks and device IDs stay stable across
+  # restarts and first-seen logic has a history to work against
+  population:
+    seed: 1337
+    customers: 100
+    mfa_methods:
+      - method: "push"
+        weight: 50
+      - method: "totp"
+        weight: 20
+      - method: "sms_otp"
+        weight: 15
+      - method: "passkey"
+        weight: 8
+      - method: "none"
+        weight: 7
+
+  # Home countries for the customer population (weighted distribution).
+  # Every generated source address is drawn from a real announced prefix in
+  # that country, see auth_networks.py. Only AU, KR, US and GB have
+  # residential prefixes there; any other code is placed in AU, with a
+  # warning in the log
   countries:
     - code: "AU"
       weight: 70
@@ -115,10 +235,10 @@ normal_traffic:
     - code: "GB"
       weight: 5
       
-  # Success/failure ratio for normal logins
+  # Success/failure ratio for normal sign-ins
   success_rate_percent: 92
   
-  # Device type distribution
+  # Primary device distribution for the customer population
   device_types:
     - type: "desktop"
       weight: 45

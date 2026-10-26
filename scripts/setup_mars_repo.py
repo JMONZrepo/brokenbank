@@ -19,7 +19,9 @@ and intellectual property for security testing scenarios including:
 Usage:
     python scripts/setup_mars_repo.py [target_path]
     
-Default target: /var/lib/brokenbank/projects/mars-banking-initiative
+Default target: <repo>/data/projects/mars-banking-initiative (/app/data/projects/mars-banking-initiative in the container)
+
+Note: the application builds this repository itself at start-up (app.py setup_mars_repo()); this script is a standalone variant for rebuilding it by hand (its history has one more commit than app.py's).
 """
 
 import os

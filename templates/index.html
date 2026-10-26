@@ -185,6 +185,25 @@
                     </div>
                 </a>
             </div>
+            <div class="col-md-6 col-lg-3">
+                <a href="#" class="estatements-link text-decoration-none" data-path="/" target="_blank">
+                    <div class="banking-service-card h-100">
+                        <div class="card border-0 shadow-sm glass-card hover-lift">
+                            <div class="card-body p-4">
+                                <div class="d-flex align-items-center mb-3">
+                                    <i data-feather="upload-cloud" class="text-primary me-2"></i>
+                                    <h5 class="card-title mb-0">{{ locale.landing_service_cards.estatements.title }}</h5>
+                                </div>
+                                <p class="card-text text-muted mb-3">{{ locale.landing_service_cards.estatements.description }}</p>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="badge bg-{{ locale.landing_service_cards.estatements.badge_type }}">{{ locale.landing_service_cards.estatements.badge }}</span>
+                                    <i data-feather="arrow-right" class="text-primary"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
         </div>
         
         <div class="row mt-4">
@@ -274,6 +293,42 @@
                     </div>
                 </div>
             </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card bg-dark border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger"><i data-feather="alert-triangle" class="me-2"></i>{{ locale.exploit_section.xml_restore.title }}</h5>
+                        <p class="card-text text-white-50">{{ locale.exploit_section.xml_restore.description }}</p>
+                        <a href="#" class="tomcat-link btn btn-outline-danger btn-sm" data-path="/exploit-app/restore" target="_blank">{{ locale.exploit_section.xml_restore.button_text }}</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card bg-dark border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger"><i data-feather="alert-triangle" class="me-2"></i>{{ locale.exploit_section.log4shell.title }}</h5>
+                        <p class="card-text text-white-50">{{ locale.exploit_section.log4shell.description }}</p>
+                        <a href="#" class="tomcat-link btn btn-outline-danger btn-sm" data-path="/exploit-app/log4shell" target="_blank">{{ locale.exploit_section.log4shell.button_text }}</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card bg-dark border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger"><i data-feather="alert-triangle" class="me-2"></i>{{ locale.exploit_section.snakeyaml.title }}</h5>
+                        <p class="card-text text-white-50">{{ locale.exploit_section.snakeyaml.description }}</p>
+                        <a href="#" class="tomcat-link btn btn-outline-danger btn-sm" data-path="/exploit-app/snakeyaml" target="_blank">{{ locale.exploit_section.snakeyaml.button_text }}</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-4">
+                <div class="card bg-dark border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title text-danger"><i data-feather="server" class="me-2"></i>{{ locale.exploit_section.php_estatements.title }}</h5>
+                        <p class="card-text text-white-50">{{ locale.exploit_section.php_estatements.description }}</p>
+                        <a href="#" class="php-link btn btn-outline-danger btn-sm" data-path="/" target="_blank">{{ locale.exploit_section.php_estatements.button_text }}</a>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="text-center">
@@ -310,6 +365,12 @@
     if (dashboardLink) {
         dashboardLink.href = tomcatBaseUrl + '/exploit-app/';
     }
+
+    // PHP eStatements portal is a separate Apache service on :8085
+    const phpBaseUrl = window.location.protocol + '//' + window.location.hostname + ':8085';
+    document.querySelectorAll('.php-link, .estatements-link').forEach(function(link) {
+        link.href = phpBaseUrl + (link.getAttribute('data-path') || '/');
+    });
 })();
 </script>
 
@@ -318,10 +379,10 @@
         <h2 class="fw-bold mb-3">{{ locale.cta.title }}</h2>
         <p class="lead mb-4">{{ locale.cta.description }}</p>
         <div class="d-flex justify-content-center gap-3">
-            <button class="btn btn-dark btn-lg">
+            <a href="{{ url_for('signup') }}" class="btn btn-dark btn-lg">
                 <i data-feather="user-plus" class="me-2"></i>
                 {{ locale.buttons.open_account }}
-            </button>
+            </a>
             <a href="{{ url_for('disclaimer') }}" class="btn btn-outline-dark btn-lg">
                 <i data-feather="shield" class="me-2"></i>
                 {{ locale.buttons.security_info }}

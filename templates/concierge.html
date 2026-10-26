@@ -17,8 +17,18 @@
                 banking operations, the SpaceATM fleet or Gateway services.
             </p>
             <p class="small text-muted mb-0">
-                Model: {{ model_name }} (local, no external API calls).
+                Model: {{ model_name }}
+                {%- if concierge_provider == 'portkey' %} via Portkey (external API).
+                {%- elif concierge_provider == 'openrouter' %} via OpenRouter (external API).
+                {%- elif concierge_provider == 'local' %} (local, no external API calls).
+                {%- else %} ({{ concierge_provider }}).
+                {%- endif %}
                 Single-turn chat; no conversation memory.
+                {%- if concierge_system_prompt_mode == 'persona' %}
+                Briefing supplied upstream; this application sends persona only.
+                {%- elif concierge_system_prompt_mode == 'none' %}
+                Briefing and persona supplied upstream; this application sends no system prompt.
+                {%- endif %}
             </p>
         </div>
     </div>
@@ -85,8 +95,9 @@
                 </h5>
                 <p class="small text-muted">
                     Fetch a remote text document and add it to the Concierge
-                    context window for the next reply. Useful for briefing
-                    the assistant with operational notes.
+                    context window. Loaded documents stay in context for
+                    every later reply, for all users, until the server
+                    restarts.
                 </p>
                 <form id="concierge-url-form" autocomplete="off">
                     <div class="mb-2">
@@ -197,9 +208,12 @@
                 </h6>
                 <p class="small text-muted mb-0">
                     This Concierge is intentionally vulnerable to prompt
-                    injection (OWASP LLM01) and sensitive information
-                    disclosure (OWASP LLM06). Do not deploy outside the
-                    GoCortex Broken Bank training environment.
+                    injection (OWASP LLM01), insecure output handling
+                    (OWASP LLM02), sensitive information disclosure
+                    (OWASP LLM06) and excessive agency (OWASP LLM08,
+                    including the POST /concierge/agent command executor).
+                    Do not deploy outside the GoCortex Broken Bank
+                    training environment.
                 </p>
             </div>
         </div>

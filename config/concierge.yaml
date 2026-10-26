@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: GoCortexIO
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# GoCortex Broken Bank - Mars Banking Initiative Concierge Configuration
+# Version: 1.6.0
+#
+# Selects which backend answers the /concierge/* endpoints. The vulnerability
+# surface (prompt injection, indirect injection, agentic tool execution) is
+# identical whichever backend is selected - only the inference engine changes.
+#
+#   local      Bundled SmolLM2-135M-Instruct GGUF via llama-cpp-python.
+#              Default. No egress, no API key, no cost - but needs AVX2/F16C/FMA
+#              (x86_64) or NEON/asimd (aarch64), and is slow on modest hosts.
+#              The Concierge disables itself entirely on a CPU without those.
+#   portkey    Portkey AI gateway (SaaS, OpenAI-compatible).
+#   openrouter OpenRouter (SaaS, OpenAI-compatible).
+#
+# The SaaS providers exist because the local model is impractical on small or
+# older hosts. They are deliberately NOT the default: selecting one adds
+# outbound HTTPS egress from the container, which matters for isolated or
+# air-gapped ranges.
+#
+# ---------------------------------------------------------------------------
+# SECURITY NOTE - READ BEFORE ENABLING A SAAS PROVIDER
+# ---------------------------------------------------------------------------
+# This application is an intentionally vulnerable training range with multiple
+# working remote-code-execution paths, and it deliberately exposes the process
+# environment: /debug returns every environment variable, and the documented
+# Tomcat primitive `?cmd=env` dumps them too. Reading them is a scripted step
+# in the BBCHAIN-06 credential-access scenario.
+#
+# Therefore ANY API key made available to this container - environment
+# variable, mounted file, or otherwise - must be treated as PUBLIC. A trainee
+# following the documented exercises will obtain it. This is not a flaw to be
+# fixed; credential exposure is the point of the range.
+#
+# The key cannot be protected here, so make it cheap to lose:
+#   - Use a dedicated, disposable key, never a shared or production one.
+#   - Set a hard spend cap and rate limit on it at the provider
+#     (Portkey virtual keys and OpenRouter both support this).
+#   - Rotate it routinely, and after any public workshop or demo.
+# ---------------------------------------------------------------------------
+
+concierge:
+  # local | portkey | openrouter
+  # Override at runtime without editing this file via CONCIERGE_PROVIDER.
+  provider: "local"
+
+  # How much system prompt this application supplies with each request.
+  # Override at runtime via CONCIERGE_SYSTEM_PROMPT.
+  #
+  #   full     Persona plus the embedded classified briefing (default, and
+  #            the original behaviour). The application supplies the material
+  #            that prompt injection is meant to extract.
+  #   persona  Persona only, no briefing. Use when the classified material is
+  #            already supplied upstream - a Portkey prompt template, a
+  #            gateway config, or a fine-tuned model that carries it - so it
+  #            is not sent twice. The Concierge still behaves in character for
+  #            ordinary banking questions.
+  #   none     No system message at all. The upstream model or gateway
+  #            template supplies everything, including persona.
+  #
+  # Anything other than "full" also disables the application's deterministic
+  # leak safety net, because there is no locally-held briefing to disclose.
+  # Any leak then genuinely originates from the model, which is what makes
+  # these modes the honest way to evaluate a hosted or custom-built model.
+  #
+  # Documents uploaded at runtime through /concierge/load_url and
+  # /concierge/load_text are NOT affected by this setting; indirect prompt
+  # injection continues to work in every mode.
+  system_prompt: "full"
+
+  # Applied to whichever provider is selected.
+  generation:
+    max_tokens: 512
+    temperature: 0.7
+    # Request timeout for the SaaS providers only (seconds). Ignored by local.
+    timeout_seconds: 30
+
+providers:
+  local:
+    # Overridden by CONCIERGE_MODEL_PATH when that is set.
+    model_path: "${CONCIERGE_MODEL_PATH}"
+    # Reported to the netbank_concierge SIEM stream.
+    model_name: "SmolLM2-135M-Instruct GGUF Q4_K_M"
+
+  portkey:
+    base_url: "https://api.portkey.ai/v1"
+    api_key: "${PORTKEY_API_KEY}"
+    # Portkey routes by provider slug plus upstream model, e.g.
+    # "@your-provider-slug/meta-llama/llama-3.3-70b-instruct".
+    model: "${PORTKEY_MODEL}"
+    auth:
+      type: "header"
+      header_name: "x-portkey-api-key"
+
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key: "${OPENROUTER_API_KEY}"
+    # e.g. "meta-llama/llama-3.3-70b-instruct" or "openai/gpt-4o-mini".
+    model: "${OPENROUTER_MODEL}"
+    auth:
+      type: "bearer"
+    # OpenRouter attributes traffic using these; both optional.
+    extra_headers:
+      HTTP-Referer: "https://github.com/simonsigre/gocortexbrokenbank"
+      X-Title: "GoCortex Broken Bank"
+
+# A general instruct model role-plays the Mars Banking Initiative concierge far
+# more convincingly than a code-specialised model, and capitulates to the
+# canonical injection payloads more realistically. Pick accordingly.

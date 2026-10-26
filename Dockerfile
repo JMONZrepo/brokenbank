@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Intentionally vulnerable Dockerfile for comprehensive policy coverage
-# Tri-server architecture: Python/Gunicorn (port 8888) + Java/Tomcat (port 9999) + React/Next.js (port 7777)
+# Five application servers, seven port listeners: Flask/Gunicorn (8888), Java/Tomcat (8080, host 9999),
+# React/Next.js SpaceATM (7777), Live Transaction Ticker (6666), PHP eStatements portal (port 8085),
+# plus sshd (22, host 2222) and the in-process OTel Prometheus scrape (9464)
 # Using Python 3.11 for PyGremlinBox compatibility + bookworm for OpenJDK 17
 FROM python:3.11-bookworm
 
@@ -65,11 +67,13 @@ RUN chmod 644 /opt/tomcat/conf/tomcat-users.xml && \
     chmod 644 /opt/tomcat/webapps/host-manager/META-INF/context.xml && \
     chmod +x /opt/tomcat/bin/setenv.sh
 
-# Exposing application ports (8888 for Flask/Gunicorn, 8080 for Tomcat - mapped to 9999 externally)
+# Exposing application ports (8888 for Flask/Gunicorn, 8080 for Tomcat - mapped to 9999 externally,
+# 7777 for the SpaceATM Terminal - React/Next.js)
 # 9464 is the OTel default Prometheus scrape port (poll-based metrics)
 # 22 is sshd, genuinely reachable via the leaked deployment key or the weak root password
 # 6666 is the Live Transaction Ticker (WebSocket)
-EXPOSE 8888 8080 7777 9464 22 6666
+# 8085 is the PHP eStatements portal (Apache mod_php, PHP 8.4.26 - PHP2Shell)
+EXPOSE 8888 8080 7777 9464 22 6666 8085
 
 # Adding secrets directly in Dockerfile (bad practice)
 ENV SECRET_KEY="hardcoded-secret-12345"
@@ -132,7 +136,17 @@ RUN npm install
 WORKDIR /app
 
 # Installing Python packages with vulnerable/older versions for security testing
-RUN pip install --no-cache-dir \
+#
+# Wrapped in the same retry/backoff pattern as the apt and llama-cpp-python
+# layers. Several of these pins predate Python 3.11 and so have no matching
+# wheel - Pillow 8.1.0 in particular is fetched as a 44.9 MB source tarball
+# and built from source. On a slow or congested link that download exceeds
+# pip's 15-second default read timeout and fails the whole layer, so the
+# timeout and retry counts are raised and the install is re-attempted.
+RUN for i in 1 2 3; do \
+    pip install --no-cache-dir \
+    --timeout 300 \
+    --retries 5 \
     flask==2.0.1 \
     flask-sqlalchemy==2.5.1 \
     requests==2.25.1 \
@@ -220,7 +234,9 @@ RUN pip install --no-cache-dir \
     pygremlinbox-tpl-1-0==1.4.6 \
     pygremlinbox-ucl-1-0==1.4.6 \
     pygremlinbox-unlicense==1.4.6 \
-    pygremlinbox-wxwindows==1.4.6
+    pygremlinbox-wxwindows==1.4.6 \
+    && break || { if [ "$i" -eq 3 ]; then echo "pip install failed after 3 attempts"; exit 1; fi; echo "pip install attempt $i failed, retrying in 10s..."; sleep 10; }; \
+    done
 
 # Install llama-cpp-python for whichever architecture the image is being
 # built for. On x86_64 the prebuilt PyPI wheel statically compiles GGML
@@ -269,10 +285,10 @@ RUN ARCH="$(uname -m)"; \
 # build fails fast on mismatch.
 #
 # To refresh the mirror (new quant or upstream revision):
-#   1. Re-run the bootstrap step in the task plan to pull the file from
-#      HuggingFace and compute its sha256sum.
-#   2. Bump the release tag (e.g. models-smollm2-135m-q4km-v2), upload
-#      the new file as a release asset.
+#   1. Download the file from HuggingFace (huggingface-cli download
+#      HuggingFaceTB/SmolLM2-135M-Instruct-GGUF smollm2-135m-instruct-q4_k_m.gguf)
+#      and compute its sha256sum.
+#   2. Upload it as an asset on a new GitHub Release of this repository.
 #   3. Update MODEL_RELEASE_URL and MODEL_SHA256 below.
 #
 # Three ways to supply a HuggingFace token for the opt-in HF path
@@ -287,14 +303,9 @@ RUN ARCH="$(uname -m)"; \
 #        docker build --build-arg HF_TOKEN=hf_xxx -f Dockerfile .
 #   3. No token (default): fetches from the GitHub Release mirror
 #      with no credentials.
-# NOTE: MODEL_SHA256 below is a placeholder. The maintainer must replace
-# it with the real 64-hex digest of the GGUF after running the bootstrap
-# step in .local/tasks/task-27.md (download once from HuggingFace,
-# sha256sum the file, attach as a release asset). Until that one-time
-# action is done, the build will fail fast with a clear error rather
-# than silently install an unverified file. The agent cannot perform
-# the bootstrap step itself: HuggingFace anonymous downloads now return
-# 401, and creating a GitHub Release requires maintainer credentials.
+# MODEL_SHA256 below is the verified SHA256 of the mirrored GGUF release
+# asset. The download is checked against it and the build fails fast on
+# any mismatch rather than installing an unverified file.
 ARG HF_TOKEN=
 ARG MODEL_SHA256=2e8040ceae7815abe0dcb3540b9995eaa1fa0d2ca9e797d0a635ae4433c68c2d
 ARG MODEL_RELEASE_URL=https://github.com/gocortexio/gocortexbrokenbank/releases/download/v1.5.0-beta.1/SmolLM2-135M-Instruct-Q4_K_M.gguf
@@ -326,7 +337,12 @@ RUN --mount=type=secret,id=hf_token,required=false \
     echo "${MODEL_SHA256}  $DEST" | sha256sum -c - && \
     chmod 644 "$DEST"
 ENV CONCIERGE_MODEL_PATH=/opt/models/smollm2-135m-instruct-q4_k_m.gguf
-ENV CONCIERGE_MODEL_NAME="SmolLM2-135M-Instruct GGUF Q4_K_M"
+# CONCIERGE_MODEL_NAME is deliberately NOT set here. It takes priority over the
+# provider-derived name, so baking it in would report the local GGUF even when
+# a SaaS provider is answering. chatbot/concierge.py:model_name() already
+# returns this same value for the local provider, and the correct upstream
+# model for portkey/openrouter. Set it explicitly at run time only to force a
+# display name.
 
 # Copying sensitive files after installation
 COPY vulnerable_data/ /app/secrets/
@@ -361,13 +377,77 @@ RUN export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java)))) && \
 # Return to app directory
 WORKDIR /app
 
-# Create supervisor configuration for dual-server startup
+# Installing PHP 8.4.26 from the official upstream source release, built as an
+# Apache mod_php module (the SAPI the PHP2Shell advisories flag as highest
+# risk). PHP 8.4.26 predates the 8.4.27 fix, so it is affected by PHP2Shell:
+#   CVE-2026-109618 and CVE-2026-109619 (both CVSS 9.2, unauthenticated RCE).
+# Built from source because every current package feed has already rolled to
+# the patched 8.4.27 - the same reason Tomcat 8.5.0 is fetched as a pinned
+# upstream tarball rather than from apt. The source tarball is pinned by the
+# SHA256 that php.net publishes for this release and verified before build.
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    apt-get update && \
+    for i in 1 2 3; do \
+        apt-get install -y --no-install-recommends \
+        build-essential autoconf pkg-config bison re2c \
+        libxml2-dev libsqlite3-dev libssl-dev \
+        apache2 apache2-dev \
+        && break || { if [ "$i" -eq 3 ]; then echo "php build-deps install failed"; exit 1; fi; echo "retry $i"; sleep 5; }; \
+    done && \
+    rm -rf /var/lib/apt/lists/* && \
+    cd /usr/src && \
+    for i in 1 2 3; do \
+        wget -q --timeout=300 -O php-8.4.26.tar.gz https://www.php.net/distributions/php-8.4.26.tar.gz \
+        && break || { if [ "$i" -eq 3 ]; then echo "php source download failed"; exit 1; fi; echo "retry $i"; sleep 10; }; \
+    done && \
+    echo "c248abaebc4bb777b80968f0760da0da8e989836e896c9ff637b6775d7d37662  php-8.4.26.tar.gz" | sha256sum -c - && \
+    tar xzf php-8.4.26.tar.gz && \
+    cd php-8.4.26 && \
+    ./configure \
+        --with-apxs2=/usr/bin/apxs \
+        --enable-opcache \
+        --with-openssl \
+        --with-config-file-path=/usr/local/php/etc \
+        --with-config-file-scan-dir=/usr/local/php/etc/conf.d && \
+    make -j"$(nproc)" && \
+    make install && \
+    mkdir -p /usr/local/php/etc/conf.d && \
+    cd /usr/src && rm -rf php-8.4.26 php-8.4.26.tar.gz && \
+    /usr/local/bin/php -v
+
+# Deliberately insecure php.ini (upload_progress on, allow_url_include on,
+# display_errors on, expose_php on) and the Apache site that serves the portal
+# on port 8085. mod_php is non-threadsafe, so Apache must use the prefork MPM.
+COPY config/php.ini /usr/local/php/etc/php.ini
+COPY config/apache-brokenbank.conf /etc/apache2/sites-available/estatements.conf
+RUN a2dismod -f mpm_event >/dev/null 2>&1 || true && \
+    a2dismod -f mpm_worker >/dev/null 2>&1 || true && \
+    a2enmod mpm_prefork >/dev/null 2>&1 && \
+    printf 'LoadModule php_module /usr/lib/apache2/modules/libphp.so\n' > /etc/apache2/mods-available/php.load && \
+    ln -sf /etc/apache2/mods-available/php.load /etc/apache2/mods-enabled/php.load && \
+    a2ensite estatements >/dev/null 2>&1 && \
+    mkdir -p /var/log/apache2
+
+# The portal application (COPY . . above placed it at /app/php-portal). The
+# uploads directory is created here rather than shipped in git: the repo's
+# .gitignore drops "uploads/", so the directory is not in the checkout and
+# must be made in the image. It is world-writable so mod_php (www-data) can
+# write to it.
+COPY php-portal/ /var/www/html/
+RUN mkdir -p /var/www/html/uploads && \
+    chmod -R 777 /var/www/html/uploads && \
+    chown -R www-data:www-data /var/www/html
+
+# Create supervisor configuration for multi-service startup (gunicorn, tomcat, log-forwarder,
+# spaceatm, sshd, cron, ticker, php-apache)
 RUN mkdir -p /var/log/supervisor
 COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Running both applications as root (Flask/Gunicorn on 8888, Tomcat on 8080)
+# supervisord runs as root and launches every service: Flask/Gunicorn (8888, with the in-process
+# OTel scrape on 9464), Tomcat (8080), SpaceATM (7777), Live Transaction Ticker (6666),
+# PHP eStatements portal (port 8085), sshd (22), log-forwarder and cron
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 
-# Health check with potential information disclosure (checks both servers)
+# Health check with potential information disclosure (checks Flask 8888, Tomcat 8080 and SpaceATM 7777)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8888/ && curl -f http://localhost:8080/ && curl -f http://localhost:7777/ || exit 1
